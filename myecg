@@ -103,8 +103,7 @@ NPKI=0;  %噪声峰值初始化为0；
 NPKF=0;  
 locs = zeros(1,x_len);   %locs数组，用于存放大于两个设定阈值的点的坐标，初始化为0
 temp = zeros(1,x_len);   %temp数组，用于存放R峰候选者
-t2 = 1;
-a2 = 1;
+
 reset_thresh = 0;  %阈值重置标志位，默认为0，为1时表示用另一套公式更新阈值
 for i=1:num_of_R;  %%遍历所有R峰
     n1=(i-1)*M +1;  %分段检测，n1是该段起始点，n2是终止点
@@ -154,40 +153,14 @@ for i=1:num_of_R;  %%遍历所有R峰
 
         [a,m]=max(temp(n1:n2));  %在通过阈值检测的所有数中取最大的作为R峰
         [aa(i),mm(i)]=max(temp(n1:n2));
-        a1 = a2;
-        a2 = a;
-        t1 = t2;  %上一次R峰位置
-        t2 = m;  %新找到的R峰位置
-        if i>=2;
-            RR_interval = ((t2+(i-1)*M)-(t1+(i-2)*M))*1000/200;  %将RR间隔与静息期400ms作比较
-                if RR_interval<400  %如果静息期内出现2个R波，则只保留大的那个
-                    if (x_hp(t1+6+(i-2)*M)> x_hp(t2+6+(i-1)*M))%比较静息期哪个R波大
-                        a = a1;
-                        m = t1; %上一次的R峰更大，保存旧的
-                        if (t1+80)>M  %400/5ms=80个样本点,360采样率则为144
-                            n1=(t1+80-M)+(i-1)*M;  %跳过静息期
-                        else
-                            n1=(t1+80)+(i-1)*M;
-                        end
-                        continue %重新找这一段的R峰
-                    else  %进入此处证明上一个R波必定是错的
-                        a = a2;
-                        m = t2; %新找到的R峰更大，保存新的
-                        locs(t1+(i-2)*M)=0;  %将上一个错误判断的R峰信息清零
-                        locs(t2+(i-2)*M)=a;  %更新上一次R峰的信息
-                        if t2+80 > M  %跳过静息期
-                            n1=(t2+80-M)+(i-1)*M; 
-                        else
-                            n1=(t2+80)+(i-1)*M;
-                        end
-                        continue  %重新找
-                    end
-                end
-        end
+
+        [peak_val,peak_loc]=findpeaks(x_integral,'minpeaksdistance',400);
         locs(m+(i-1)*M)=a;   %%寻找temp序列最大值及其对应的点序号
         get_R=1; %找到R峰
     end
 end
+
+
 %%  显示QRS峰 
 figure(2)
 hold on; 
