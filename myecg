@@ -2,19 +2,15 @@ clc;
 clear all
 close all
 %%  
-%  数据来源是MIT-BIH 心律失常数据库。
-%  用工具箱的rdsamp读取心电信号，数据格式是:"样本数"×2，第一列是MLII导联数据，
+%  Sources come from MIT-BIH, Arrhythmia datebase。
+%  use WFDB's tool ,"rdsamp" to read ECG，数据格式是:"样本数"×2，第一列是MLII导联数据，
 %  第二列是V5导联数据
-[tm, signal,Fs]=rdsamp('C:\Program Files\MATLAB\matlab_work\201\201.dat',[],1000);
-x1 = signal(:,1); %单独读取第二列V5导联数据
+[tm, signal,Fs]=rdsamp('D:\SoftwareInstallation\matlab\matlab_work\WFDB\201\201.dat',[],12000,3000);
+raw_sig = signal(:,1); %read V5 data only
 fs = 200;              
-x_len = length (x1);  % 获得数据长度  
-for i=1:22
-    t1(i) = x1(1);  % 将信号往后推16+6个样本，为与滤波后图形保持一致
-end
-raw_sig = [t1,x1(1:(x_len-22))']; %将修正延迟后的信号另存为raw_sig
+x_len = length (x1);  % get the length of signal  
 
-figure(1)
+figure(1)   % draw sig
 subplot(6,1,1)
 plot(raw_sig);
 axis tight;
@@ -23,43 +19,36 @@ title('Raw ECG Signal');
 %%  Low Pass Filter  H(z) = ((1 - z^(-6))^2)/(1 - z^(-1))^2
 b=[1 0 0 0 0 0 -2 0 0 0 0 0 1];
 a=[1 -2 1];
-x2=filter(b,a,x1); 
-for i=1:16
-    t2(i) = x2(1);%将信号再延迟16个采样点，因为低通已经造成信号6个采样点的延迟
-end
-x_lp = [t2,x2(1:(x_len-16))']; %将修正低通延迟后的信号另存为x_lp
+x_lp = filter(b,a,x1); 
 
 subplot(6,1,2)
 plot(x_lp)
 axis tight;
 title('Low Pass Filter');
 
-%% 高通,截止频率5Hz  H(z) = (-1+32z^(-16)+z^(-32))/(1+z^(-1))
+%% high pass Filter  H(z) = (-1+32z^(-16)+z^(-32))/(1+z^(-1))
 b = [-1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 32 -32 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1];
 a = [1 -1];
-x_hp=filter(b,a,x2); %高通滤波,16个样本延迟
-x_hp = x_hp/ max( abs(x_hp ));  %归一化
+x_hp=filter(b,a,x2); % the filter delay is 16 sample
+x_hp = x_hp/ max( abs(x_hp ));  % normalized
 
 subplot(6,1,3)
 plot(x_hp)
 axis tight;
 title('High Pass filter');
 
-%% 导数滤波  H(z) = (1/8T)(-z^(-2) - 2z^(-1) + 2z + z^(2))
+%% Derivative filter  H(z) = (1/8T)(-z^(-2) - 2z^(-1) + 2z + z^(2))
 b = [-1 -2 0 2 1]/8;
 a = 1;
-x_diff = filter(b,a,x_hp);%导数滤波器，即微分,造成2个样本延迟,忽略
-for i=1:37
-    x_diff(i) = 0; %舍弃由于延迟造成的误差值，6+16+15(后面积分还有15个延迟)=37
-end
-x_diff = x_diff/ max( abs(x_diff )); %归一化
+x_diff = filter(b,a,x_hp); % 导数滤波器，delay is 2 sample
+x_diff = x_diff/ max( abs(x_diff )); % normalized
 
 subplot(6,1,4)
 plot(x_diff)
 axis tight;
 title('derivative filter');
 
-%% 平方函数，对导数进行非线性放大
+%% Squaring function，对导数进行非线性放大 amplify 
 x_sq = x_diff .^2;  %逐点平方对幅度变化敏感，误检、漏检率增加
 % x_sq = abs( x_diff); %取绝对值代替平方
 
@@ -68,107 +57,227 @@ plot(x_sq)
 axis tight;
 title('square function');
 
-%% 移动窗积分-平均  Y(nt) = (1/N)[x(nT-(N - 1)T)+ x(nT - (N - 2)T)+...+x(nT)]
+%% Moving window integration
+% Y(nt) = (1/N)[x(nT-(N - 1)T)+ x(nT - (N - 2)T)+...+x(nT)]
 % 窗宽的选择非常重要，将直接影响最终R波的检测精度。如果R波检测到在山腰，可考虑改窗宽
+% 移动窗积分造成15个样本延迟
 for n=1:(x_len-15);
-    x_integral(n)=sum(x_sq(n:n+15))/16;  %移动窗积分造成15个样本延迟
+    x_integral(n)=sum(x_sq(n:n+15))/16;  %width of the window is 16 sample(can be changed)
 end
 for n=(x_len-14):x_len;
-    x_integral(n)=sum(x_sq(n:x_len))/(x_len-n+1);
+    x_integral(n)=sum(x_sq(n:x_len))/(x_len-n+1); %尾段15个样本
 end
 
-x_integral=[zeros(1,6),x_integral(1:x_len-6)];  %积分后波形往后推6个样本，使之与滤波信号对齐
 subplot(6,1,6)
-plot((1:x_len),x_integral,(1:x_len),x_hp);  %同时画出积分和滤波信号，观察波形是否对齐
+plot((1:x_len),x_integral,(1:x_len),x_hp);  %同时画出积分和滤波信号，观察波形相对位置
 axis tight;
-title('移动窗口积分');
+title('Integration');
 
-%%  估计R峰的数量
-num_of_R = 0; 
-max_diff = max(x_diff);
-thresh = 0.375*max_diff; 
-for i=38:length(x_diff)-1;  %前37个已置0
-    if x_hp(i)>thresh && (x_diff(i,1)*x_diff(i+1)<0) 
-        num_of_R = num_of_R+1;
-    end
-end
+%%%%%%%%%%%%%%%%%%%%%%%   Relus   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%% 进行阈值比较
-% M=285; %此为经验参数
-M=floor(length(x_hp)/num_of_R);  
-SPKI=max(x_integral(1:M));  %取其中一份的max作为初始积分信号峰值估计
-SPKF=max(x_hp(1:M)); %取其中一份的max作为初始滤波信号峰值估计
+%% Trainning phase① %%
+% base on sig&noise，need 2s to initialize the threshold 
+SPKI=max(x_integral(1:round(2*fs)));
+NPKI=0.125*SPKI;
+THRESHOLDI1=NPKI+0.25*(SPKI-NPKI); 
+%regard the sig which bigger than THRESHOLDI1 as signal
+THRESHOLDI2=0.5*THRESHOLDI1; 
+%regard the sig which smaller than THRESHOLDI2 as noise
 
-NPKI=0;  %噪声峰值初始化为0；
-NPKF=0;  
-locs = zeros(1,x_len);   %locs数组，用于存放大于两个设定阈值的点的坐标，初始化为0
-temp = zeros(1,x_len);   %temp数组，用于存放R峰候选者
+SPKF=max(x_hp(1:round(2*fs)));
+NPKF=0.125*SPKF;
+THRESHOLDF1=NPKF+0.25*(SPKF-NPKF);
+THRESHOLDF2=0.5*THRESHOLDF1;
 
-reset_thresh = 0;  %阈值重置标志位，默认为0，为1时表示用另一套公式更新阈值
-for i=1:num_of_R;  %%遍历所有R峰
-    n1=(i-1)*M +1;  %分段检测，n1是该段起始点，n2是终止点
-    n2=i*M;
-    get_R=0;  %是否找到R峰的标志位，为1时表示找到R峰
+%% Trainning phase② 用2个心拍初始化RR_average  %%
 
-    %%%%%%%%%%%%%%%%%  一阈值于积分信号，二阈值于滤波信号  %%%%%%%%%%%%%%%%%%%%
-    if reset_thresh ==0  %默认的阈值更新公式
-        PEAKI=max( x_integral (n1:n2));  %找出这一段integral后QRS波群的峰值
-        SPKI=0.125*PEAKI+0.875*SPKI;
-        NPKI=0.125*PEAKI+0.875*NPKI;
-        THRESHOLDI1=NPKI+0.25*(SPKI-NPKI);  
+%%
+[pi_val,pi_locs]=findpeaks(x_integral,'MINPEAKDISTANCE',40);
+% pick out all the peaks of integral sig.
+% 因为R波有200ms的不应期，即40个样本间隔。故findpeaks如果在200ms内检测到两个峰，则保留幅值最大的峰。
+% peak_val, An array, for saving peak's values of integral sig 
+% peak_locs, An array, for saving peak's locations of integral sig 
 
-        PEAKF=max( x_hp (n1:n2));   %找出这一段filter后QRS波群的峰值
-        SPKF=0.125*PEAKF+0.875*SPKF;
-        NPKF=0.125*PEAKF+0.875*NPKF;
-        THRESHOLDF1=NPKF+0.25*(SPKF-NPKF);
+
+
+%% Rwave detection %%
+%initialize
+RF_index=[];%save the real R wave's location (high pass sig)
+RF_amp=[];%save real R wave's amplitude
+
+RI_index=[];%save the real R wave's location (integration sig)
+RI_amp=[];
+
+pf_val=[];%save the corresponding peak'info of filtered sig 
+pf_locs=[];
+
+noise_x=[];%pick out the noise
+noise_y=[];
+
+mean_RR1 = 0; % initialize the mean RR interval 1
+mean_RR2 = 0; % initialize the mean RR interval 2
+
+for i=1:length(pi_val) %遍历所有选出来的波峰
+    % locate the corresponding peak in filtered sig 
+    % 从高通到积分信号有样本延迟，所以在0.2*fs个样本范围内定位
+    if i == 1 %when start
+    	[pf_val,pf_locs] = max(x_hp(1:pi_locs(i)+round(0.2*fs)));
+    	start_flag = 1; %set the flag
+    elseif  pi_locs(i)+round(0.2*fs) <= length(x_hp) && i>1
+        [pf_val,pf_locs] = max(x_hp(pi_locs(i):pi_locs(i)+round(0.2*fs)));
+    elseif pi_locs(i)+round(0.2*fs) >= length(x_hp)
+    	[pf_val,pf_locs] = max(x_hp(pi_locs(i):end));  
     end
     
-    if reset_thresh==1  %用该套公式更新阈值时是因为上一次找到的R峰是用低阈值所找到的
-        PEAKI=max( x_integral (n1:n2));  
-        SPKI=0.25*PEAKI+0.75*SPKI;
-        NPKI=0.125*PEAKI+0.875*NPKI;
-        THRESHOLDI1=NPKI+0.25*(SPKI-NPKI);
-
-        PEAKF=max( x_hp (n1:n2));   %将一份的max作为filter后QRS波群的峰值
-        SPKF=0.25*PEAKF+0.75*SPKF;
-        NPKF=0.125*PEAKF+0.875*NPKF;
-        THRESHOLDF1=NPKF+0.25*(SPKF-NPKF);
-        reset_thresh=0;  %重置该标志位
+    %%%%%%%%%%%%%%%%%%%%  check the RR interval  %%%%%%%%%%%%%%%%%%%%
+    
+    if (length(RF_index)>=9)
+        RR_interval=diff(RF_index);
+        mean_RR1=mean(RR_interval(end-7:end)); %mean_RR1=RR_average1
+        late_RR=RF_index(end)-RF_index(end-1); %latest real RR interval
+        if late_RR<=0.92*mean_RR1 || late_RR>=1.16*mean_RR1
+            %unregular ESG signal ,lower down the first threshold of group
+            THRESHOLDI1 = 0.5*THRESHOLDI1;
+            THRESHOLDF1 = 0.5*THRESHOLDF1;
+        end
+        
+        RR_interval2=RR_interval(RR_interval>=0.92*mean_RR1);
+        RR_interval2=RR_interval2(RR_interval2<=1.16*mean_RR1);
+        % 选出92%<RR<116%范围内的，计算RR_average2
+        if length(RR_interval2)>=8 
+            mean_RR2=mean(RR_interval2(end-7:end));%mean_RR2=RR_average2
+        else
+            mean_RR2=mean(RR_interval2);
+        end
+    else
+        mean_RR2=mean(diff(RF_index));
     end
+    
+    if length(RI_index)>=2 &&(pi_locs(i)-RI_index(end)) >= round(1.66*mean_RR2) %latest RR
+        % 如果已正确检测的R波个数不为0，且当前RR>166%，表示missed
+        % 积分信号的定位
+        [pks_temp,locs_temp] = max(x_integral(RI_index(end)+ round(0.2*fs):pi_locs(i)-round(0.2*fs)));
+        % 跳过0.2fs的静息期，search back and locate the max in this interval
+        locs_temp = RI_index(end)+ round(0.2*fs) + locs_temp -1; %location 
+        
+        
+        if pks_temp >=THRESHOLDI2
+            [temp_amp,temp_index]=max(x_hp(locs_temp:locs_temp+round(0.2*fs)));
+            temp_index=locs_temp + temp_index - 1;
+            if temp_amp >=THRESHOLDF2
+                RI_amp = [RI_amp pks_temp];
+                RI_index = [RI_index locs_temp];
+                
+%                 RF_amp=[RF_amp,temp_amp];
+                RF_index=[RF_index,temp_index];
+                
+                %用第二套公式更新
+                PEAKI=pks_temp;
+                SPKI=0.25*PEAKI+0.75*SPKI;
+%                 NPKI=0.125*PEAKI+0.875*NPKI;
+                THRESHOLDI1=NPKI+0.25*(SPKI-NPKI);
+                THRESHOLDI2=0.5*THRESHOLDI1;
 
-    while get_R==0  %设置一个循环，直到找到R峰才允许跳出
-        for n=n1:n2;
-            if x_integral(n)>THRESHOLDI1 && x_hp(n)>THRESHOLDF1 %大于第一、二阈值
-                temp(n) = x_hp(n); %候选者存放起来
-            else
-                temp(n)= 0;  %否则认为是噪声存0
+                PEAKF=temp_amp;
+                SPKF=0.25*PEAKF+0.75*SPKF;
+%                 NPKF=0.125*PEAKF+0.875*NPKF;
+                THRESHOLDF1=NPKF+0.25*(SPKF-NPKF);
+                THRESHOLDF2=0.5*THRESHOLDF1;
             end
         end
-        if n==n2 && max(temp(n1:n2))==0  %如果遍历完了仍未找到R峰，则将阈值下降一半，复检
-            THRESHOLDI1=0.5*THRESHOLDI1;
-            THRESHOLDF1=0.5*THRESHOLDF1;
-            reset_thresh=1;
-            continue  %使用低阈值重新找
+    end
+        
+    %%%%%%% 常规R波检测  用第一阈值  %%%%%%%%%
+    if pi_locs(i) >= THRESHOLDI1 %积分sig阈值
+        
+        %%%%%%%%%%%%%% 先检测当前peak是不是Twave %%%%%%%%%%%%%%%%
+        % R candidate occurs within 360ms of the previous R,
+        % determin if it's deteceted right or a T wave
+        if length(RF_index) >= 2 && (pi_locs(i)-RI_index(end)) <= round(0.36*fs)
+            %该波形信号的斜率
+            slope1=max(abs(diff(x_hp(pi_locs(i)+pf_locs-round(0.1*fs):pi_locs(i)+pf_locs))));
+            %之前正确R波的斜率
+            slope2=max(abs(diff(x_hp(RF_index(end)-round(0.1*fs):RF_index(end)))));
+            
+            if slope1 <= abs(0.5*slope2)%为真即说明该波是T wave,应当噪声处理
+                noise_y=[noise_y,pf_val];
+                noise_x=[noise_x,pi_locs(i)+pf_locs-1];
+                %更新噪声峰值估计
+                PEAKI=pi_val(i);
+%                 SPKI=0.25*PEAKI+0.75*SPKI;
+                NPKI=0.125*PEAKI+0.875*NPKI;
+                THRESHOLDI1=NPKI+0.25*(SPKI-NPKI);
+                THRESHOLDI2=0.5*THRESHOLDI1;
+
+                PEAKF=pf_val;
+%                 SPKF=0.25*PEAKF+0.75*SPKF;
+                NPKF=0.125*PEAKF+0.875*NPKF;
+                THRESHOLDF1=NPKF+0.25*(SPKF-NPKF);
+                THRESHOLDF2=0.5*THRESHOLDF1;
+                
+            else 
+%                 RF_amp=[RF_amp,pf_val];
+                RF_index=[RF_index,pi_locs(i)+pf_locs-1];
+                RI_amp=[RI_amp,pi_val(i)];
+                RI_index=[RI_index,pi_locs(i)];
+            end
         end
+        %%%%%%%%%%% 滤波信号与阈值比较 %%%%%%%%%%%%%%%%%
+        if pf_val >= THRESHOLDF2
+            PEAKF=pf_val;
+            if pf_val <THRESHOLDF1 %  T1>pf_val>T2 情况
+                SPKF=0.25*PEAKF+0.75*SPKF;
+            else % pf_val>T1情况
+                SPKF=0.125*PEAKF+0.875*SPKF;  
+            end
+%             NPKF=0.125*PEAKF+0.875*NPKF;
+            THRESHOLDF1=NPKF+0.25*(SPKF-NPKF);
+            THRESHOLDF2=0.5*THRESHOLDF1;
+            
+            if start_flag  %起始端
+                if pf_val <= max(x_hp(1:round(2*fs)))/3 
+                    noise_y=[noise_y,pf_val];
+                    noise_x=[noise_x,pf_locs];
+                else
+                    RF_index=[RF_index,pf_locs];
+                    RI_index=[RI_index,pi_locs(1)];
+                end
+                start_flag=0;
+            else
+                pf_locs=pi_locs(i)+pf_locs-1;
+                RF_index=[RF_index,pf_locs];
+                RI_index=[RI_index,pi_locs(i)];
+            end
+%             RF_amp=[RF_amp,pf_val]; %幅值也一并保存
+        end 
+        
+    elseif THRESHOLDI2 <= pi_locs(i) && pi_locs(i)<THRESHOLDI1 %
 
-        [a,m]=max(temp(n1:n2));  %在通过阈值检测的所有数中取最大的作为R峰
-        [aa(i),mm(i)]=max(temp(n1:n2));
-
-        [peak_val,peak_loc]=findpeaks(x_integral,'minpeaksdistance',400);
-        locs(m+(i-1)*M)=a;   %%寻找temp序列最大值及其对应的点序号
-        get_R=1; %找到R峰
+  
+    elseif pi_locs(i) < THRESHOLDI2 %可认定这个是噪声
+        noise_y = [noise_y,pi_val(i)];
+        noise_x = [noise_x,pi_locs(i)];
+        
+        PEAKI=pi_val(i);
+%          SPKI=0.25*PEAKI+0.75*SPKI;
+        NPKI=0.125*PEAKI+0.875*NPKI;
+        THRESHOLDI1=NPKI+0.25*(SPKI-NPKI);
+        THRESHOLDI2=0.5*THRESHOLDI1;
+    end
+    if i==1
+        start_flag=0;
     end
 end
-
 
 %%  显示QRS峰 
 figure(2)
 hold on; 
-plot(tm,x_hp);
-for n=1:x_len
-    if locs(n)~=0  %不为0的点即是筛选出来的R峰点
-        plot(tm(n),x_hp(n),'ro');
-    end
+plot(x_hp);
+for n=1:length(RF_index)
+    plot(RF_index(n),x_hp(RF_index(n)),'ro');
 end
 title('修正延迟后的R峰与滤波后心电图的关系');
-hold off;
+hold off;            
+        
+        
+    
